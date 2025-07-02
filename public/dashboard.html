@@ -46,26 +46,27 @@
   </div>
 
   <script>
-    document.addEventListener("DOMContentLoaded", async () => {
-      try {
-        const response = await fetch("/api/session", {
-          method: "GET",
-          credentials: "include"
-        });
+  document.addEventListener("DOMContentLoaded", async () => {
+    try {
+      const response = await fetch("/api/session", {
+        method: "GET",
+        credentials: "include"
+      });
 
-        const data = await response.json();
-        if (!data.success) {
-          window.location.href = "/";
-        }
-      } catch (error) {
+      const data = await response.json();
+      if (!data.success) {
         window.location.href = "/";
       }
-    });
-
-    function logout() {
-      document.cookie = "session=; Path=/; Max-Age=0; SameSite=Strict";
+    } catch (error) {
       window.location.href = "/";
     }
+  });
+
+  function logout() {
+    const cookieName = "session";
+    document.cookie = `${cookieName}=; Path=/; Max-Age=0; SameSite=Strict;`;
+    window.location.href = "/";
+  }
   </script>
 </body>
 </html>
